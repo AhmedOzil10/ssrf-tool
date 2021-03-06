@@ -1,0 +1,118 @@
+#!/usr/bin/python
+import bs4
+import requests
+import urlparse
+import urllib
+import time
+import os
+import argparse
+import re
+import sys
+import smtplib
+import ConfigParser
+from bs4 import BeautifulSoup
+from colorama import Style,Fore
+
+def send_mail(server, fromaddr, toaddr, url, payload):
+	try:
+		subject="SSRF FOUND"
+		body = 'Url: %s\n Could Be vulnerable to SSRF %s' % (url, payload)
+		email_text="""\
+		From:%s
+		To:%s
+		Subject:%s
+		%s
+		""" % (fromaddr,toaddr,subject,body)
+		server.sendmail(fromaddr, toaddr, email_text)
+	except:
+		pass
+
+# Sign in to the gmail account
+def signin_gmail(username,password):
+	try:
+		server=smtplib.SMTP('smtp.gmail.com', 587)
+		server.ehlo()
+		server.starttls()
+		server.ehlo()
+		server.login(username, password)
+		print Fore.WHITE+Style.BRIGHT+"["+Fore.GREEN+"+"+Fore.WHITE+"] "+Fore.YELLOW+"Email notifications being sent to "+username
+		time.sleep(2)
+		return server
+	except:
+		print Fore.RED+Style.BRIGHT+"[!] Email notifications will not be possible could not sign in"
+		time.sleep(2)
+		pass
+# The arguments
+def arguments():
+	print(Style.BRIGHT + Fore.CYAN + """
+
+
+   _____ _____ _____  ______ 
+  / ____/ ____|  __ \|  ____|
+ | (___| (___ | |__) | |__   
+  \___ \\___ \|  _  /|  __|  
+  ____) |___) | | \ \| |     
+ |_____/_____/|_|  \_\_|     
+
+  """+Fore.RED+"""\t#Helper#\n""")
+	
+
+	try:
+		# Login to gmail
+		global config
+		config=ConfigParser.RawConfigParser()
+		config.read('config.conf')
+		global gmail_username
+		gmail_username=config.get('Config', 'gmail_username')	
+		gmail_password=config.get('Config', 'gmail_password')	
+		global server
+		server=signin_gmail(gmail_username, gmail_password)	
+	except:
+		pass
+
+	print(Style.BRIGHT + Fore.WHITE + "\n[" + Fore.BLUE + "+" + Fore.WHITE + "] Fetching Links to test, Please wait\n")
+	time.sleep(1)	
+	ssrfcount=0
+	for url in iter(sys.stdin.readline, b''):
+		test_urls(url, ssrfcount)
+
+# Make the request
+def make_http_request(url, ssrfcount):
+		try:
+            		urlParams = url.split("?")[1]
+        		urlParams = urlParams.split("&")
+        		for param in urlParams:
+           			try:
+					# Get Parameters
+                			param = param.split("=")
+                			paramStr = str(param[0]+"="+param[1])
+					
+					bin=config.get('Requests', 'requests_bin')
+                			newUrl = url.replace(paramStr.split("=")[1],bin)
+					# Make external request	
+					#print(Style.BRIGHT+Fore.WHITE+"["+Fore.GREEN+"+"+Style.BRIGHT+Fore.WHITE+"]"+Fore.RED + " Found Potential SSRF Parameter ["+Fore.GREEN+param+Fore.RED+"]")
+					print(Style.BRIGHT+Fore.WHITE+"["+Fore.BLUE+"+"+Style.BRIGHT+Fore.WHITE+"] Making Request to " + newUrl)
+					requests.get(newUrl, timeout=10)
+					r=requests.get(bin + "?inspect", timeout=10)
+					parse=bs4.BeautifulSoup(r.text, features="lxml")
+					list=parse.findAll('div', class_='message-list')
+					currentcount=len(list)
+					if currentcount!=ssrfcount:
+						ssrfcount=currentcount
+						try:
+							send_mail(server, gmail_username, gmail_username, newUrl, bin)
+						except:
+							pass
+						print(Style.BRIGHT+Fore.WHITE+"["+Fore.RED+"+"+Style.BRIGHT+Fore.WHITE+"] "+Fore.GREEN+"FOUND SSRF VULNERABILITIY")				
+				except:
+					pass
+		except:
+			pass
+
+def test_urls(url, ssrfcount):
+	try:
+		print Style.BRIGHT+Fore.BLUE+"Testing: "+Fore.WHITE+Style.DIM+url
+		make_http_request(urllib.unquote(url.decode('utf-8')), ssrfcount)
+	except:
+		pass
+arguments()
